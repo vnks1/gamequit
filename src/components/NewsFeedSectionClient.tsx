@@ -50,7 +50,8 @@ export default function NewsFeedSectionClient({
 
       const payload = (await response.json()) as FeedApiResponse;
       setItems(Array.isArray(payload.items) ? payload.items : []);
-      window.history.replaceState(window.history.state, "", `/noticias/${nextPlatform}`);
+      const nextUrl = nextPlatform === "all" ? "/" : `/noticias/${nextPlatform}`;
+      window.history.replaceState(window.history.state, "", nextUrl);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setActivePlatform(previousPlatform);

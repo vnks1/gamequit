@@ -5,7 +5,7 @@ export default function Header() {
   return (
     <header className="absolute inset-x-0 top-0 z-20 mx-auto w-full max-w-[1280px] px-8 pt-8">
       <div className="flex items-center justify-center md:justify-between">
-        <Link href="/noticias/pc" aria-label="Gamequit">
+        <Link href="/" aria-label="Gamequit">
           <Image
             src="/logosvg.svg"
             alt="Gamequit"
