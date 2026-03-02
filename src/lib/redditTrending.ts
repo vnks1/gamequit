@@ -8,25 +8,20 @@ export type RedditPost = {
     permalink: string;
     url: string;
     image: string | null;
-    score: number;
-    comments: number;
     createdUtc: number;
-    rankingScore: number;
 };
 
-export type RedditTrendingData = {
-    geral: RedditPost[];
-    pc: RedditPost[];
-    playstation: RedditPost[];
-    xbox: RedditPost[];
+export type RedditSectionData = {
+    featured: RedditPost[];
+    latest: RedditPost[];
 };
 
-const SUBREDDITS: Record<keyof RedditTrendingData, string[]> = {
+const SUBREDDITS = {
     geral: ["games", "gaming", "GamingLeaksAndRumours"],
     pc: ["pcgaming", "Steam", "pcmasterrace"],
     playstation: ["PS5", "playstation"],
     xbox: ["XboxSeriesX", "xboxone"],
-};
+} as const;
 
 const ALL_SUBREDDITS = Object.values(SUBREDDITS).flat();
 const REVALIDATE = 300;
@@ -109,18 +104,6 @@ function getEntryLink(link: AtomEntry["link"]): string | null {
     return null;
 }
 
-function stripHtml(html: string): string {
-    return html
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&amp;/g, "&")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">")
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
 function extractImageFromHtml(html: string): string | null {
     const match = html.match(/<img[^>]+src=["']([^"']+)["']/i);
     if (!match?.[1]) return null;
@@ -158,7 +141,6 @@ function normalizeEntry(entry: AtomEntry, subreddit: string): RedditPost | null 
         getXmlText(entry.summary) ||
         getXmlText(entry.description);
 
-    stripHtml(htmlContent);
     const image = extractImageFromHtml(htmlContent);
     const createdUtc = parseCreatedUtc(entry);
 
@@ -169,10 +151,7 @@ function normalizeEntry(entry: AtomEntry, subreddit: string): RedditPost | null 
         permalink,
         url,
         image,
-        score: 0,
-        comments: 0,
         createdUtc,
-        rankingScore: createdUtc,
     };
 }
 
@@ -188,68 +167,74 @@ function parseRssFeed(xml: string, subreddit: string): RedditPost[] {
         .filter((entry): entry is RedditPost => entry !== null);
 }
 
-async function fetchSubredditFeed(subreddit: string): Promise<RedditPost[]> {
-    const primaryUrl = `https://www.reddit.com/r/${subreddit}/top/.rss?t=day`;
-    const fallbackUrl = `https://www.reddit.com/r/${subreddit}/.rss`;
+async function fetchSubredditFeed(subreddit: string, path: string): Promise<RedditPost[]> {
+    const url = `https://www.reddit.com/r/${subreddit}/${path}`;
 
-    for (const url of [primaryUrl, fallbackUrl]) {
-        try {
-            const res = await fetch(url, {
-                next: { revalidate: REVALIDATE },
-                headers: {
-                    "User-Agent": REDDIT_USER_AGENT,
-                    Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
-                },
-            });
+    try {
+        const res = await fetch(url, {
+            next: { revalidate: REVALIDATE },
+            headers: {
+                "User-Agent": REDDIT_USER_AGENT,
+                Accept: "application/rss+xml, application/atom+xml, application/xml, text/xml",
+            },
+        });
 
-            if (!res.ok) {
-                console.error("[redditTrending] rss fetch failed", {
-                    subreddit,
-                    url,
-                    status: res.status,
-                    statusText: res.statusText,
-                });
-                continue;
-            }
-
-            const xml = await res.text();
-            const posts = parseRssFeed(xml, subreddit);
-
-            if (posts.length > 0) return posts;
-        } catch (error) {
-            console.error("[redditTrending] rss fetch error", {
+        if (!res.ok) {
+            console.error("[redditTrending] rss fetch failed", {
                 subreddit,
                 url,
-                message: error instanceof Error ? error.message : String(error),
+                status: res.status,
+                statusText: res.statusText,
             });
+            return [];
         }
-    }
 
-    return [];
+        const xml = await res.text();
+        return parseRssFeed(xml, subreddit);
+    } catch (error) {
+        console.error("[redditTrending] rss fetch error", {
+            subreddit,
+            url,
+            message: error instanceof Error ? error.message : String(error),
+        });
+        return [];
+    }
 }
 
-export async function getAllRedditTrending(): Promise<RedditPost[]> {
-    const results = await Promise.allSettled(
-        ALL_SUBREDDITS.map((subreddit) => fetchSubredditFeed(subreddit)),
-    );
-
+function dedupeAndSort(posts: RedditPost[]): RedditPost[] {
     const deduped = new Map<string, RedditPost>();
 
-    for (const result of results) {
-        if (result.status !== "fulfilled") continue;
-
-        for (const post of result.value) {
-            if (!deduped.has(post.permalink)) {
-                deduped.set(post.permalink, post);
-            }
+    for (const post of posts) {
+        if (!deduped.has(post.permalink)) {
+            deduped.set(post.permalink, post);
         }
     }
 
     return [...deduped.values()]
         .sort((a, b) => b.createdUtc - a.createdUtc)
-        .slice(0, MAX_PER_CATEGORY)
-        .map((post) => ({
-            ...post,
-            rankingScore: post.createdUtc,
-        }));
+        .slice(0, MAX_PER_CATEGORY);
+}
+
+async function collectPosts(path: string): Promise<RedditPost[]> {
+    const results = await Promise.allSettled(
+        ALL_SUBREDDITS.map((subreddit) => fetchSubredditFeed(subreddit, path)),
+    );
+
+    return dedupeAndSort(
+        results
+            .filter((result): result is PromiseFulfilledResult<RedditPost[]> => result.status === "fulfilled")
+            .flatMap((result) => result.value),
+    );
+}
+
+export async function getAllRedditTrending(): Promise<RedditSectionData> {
+    const [featured, latest] = await Promise.all([
+        collectPosts("top/.rss?t=day"),
+        collectPosts(".rss"),
+    ]);
+
+    return {
+        featured,
+        latest,
+    };
 }
