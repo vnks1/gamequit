@@ -85,50 +85,69 @@ function computeRankingScore(numComments: number, createdUtc: number, nowUtc: nu
 }
 
 async function fetchSubreddit(subreddit: string, nowUtc: number): Promise<RedditPost[]> {
+    const urls = [
+        `https://www.reddit.com/r/${subreddit}/hot.json?limit=50`,
+        `https://api.reddit.com/r/${subreddit}/hot?limit=50`,
+    ];
+
     try {
-        const res = await fetch(
-            `https://www.reddit.com/r/${subreddit}/hot.json?limit=50`,
-            {
+        for (const url of urls) {
+            const res = await fetch(url, {
                 next: { revalidate: REVALIDATE },
                 headers: {
-                    // Reddit requires a browser-like User-Agent to avoid 429
+                    // Reddit often rate-limits generic server traffic; a specific UA helps.
                     "User-Agent": "Mozilla/5.0 GameQuit/1.0 (+https://gamequit.com.br)",
                     Accept: "application/json",
                 },
-            },
-        );
-
-        if (!res.ok) return [];
-
-        const json = (await res.json()) as RedditApiResponse;
-        const children = json.data?.children ?? [];
-
-        const posts: RedditPost[] = [];
-
-        for (const child of children) {
-            const d = child.data;
-
-            // Skip NSFW
-            if (d.over_18) continue;
-
-            const rankingScore = computeRankingScore(d.num_comments, d.created_utc, nowUtc);
-
-            posts.push({
-                id: d.id,
-                title: d.title,
-                subreddit: d.subreddit,
-                permalink: `https://www.reddit.com${d.permalink}`,
-                url: d.url,
-                image: extractImage(d),
-                score: d.score,
-                comments: d.num_comments,
-                createdUtc: d.created_utc,
-                rankingScore,
             });
+
+            if (!res.ok) {
+                console.error("[redditTrending] fetch failed", {
+                    subreddit,
+                    url,
+                    status: res.status,
+                    statusText: res.statusText,
+                });
+                continue;
+            }
+
+            const json = (await res.json()) as RedditApiResponse;
+            const children = json.data?.children ?? [];
+
+            const posts: RedditPost[] = [];
+
+            for (const child of children) {
+                const d = child.data;
+
+                // Skip NSFW
+                if (d.over_18) continue;
+
+                const rankingScore = computeRankingScore(d.num_comments, d.created_utc, nowUtc);
+
+                posts.push({
+                    id: d.id,
+                    title: d.title,
+                    subreddit: d.subreddit,
+                    permalink: `https://www.reddit.com${d.permalink}`,
+                    url: d.url,
+                    image: extractImage(d),
+                    score: d.score,
+                    comments: d.num_comments,
+                    createdUtc: d.created_utc,
+                    rankingScore,
+                });
+            }
+
+            return posts;
         }
 
-        return posts;
-    } catch {
+        console.error("[redditTrending] all fetch attempts failed", { subreddit });
+        return [];
+    } catch (error) {
+        console.error("[redditTrending] unexpected fetch error", {
+            subreddit,
+            message: error instanceof Error ? error.message : String(error),
+        });
         return [];
     }
 }
