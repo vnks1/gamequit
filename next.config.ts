@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "i.redd.it" },
       { protocol: "https", hostname: "preview.redd.it" },
       { protocol: "https", hostname: "external-preview.redd.it" },
+      { protocol: "https", hostname: "images.igdb.com" },
     ],
   },
 };

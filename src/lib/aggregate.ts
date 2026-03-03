@@ -240,9 +240,9 @@ function heroScore(item: NewsItem): number {
 }
 
 function compareHeroCandidates(a: NewsItem, b: NewsItem): number {
-  const publishedDiff = toUnixSeconds(b.publishedAt) - toUnixSeconds(a.publishedAt);
-  if (publishedDiff !== 0) return publishedDiff;
-  return heroScore(b) - heroScore(a);
+  const scoreDiff = heroScore(b) - heroScore(a);
+  if (scoreDiff !== 0) return scoreDiff;
+  return toUnixSeconds(b.publishedAt) - toUnixSeconds(a.publishedAt);
 }
 
 function getRecencyFactor(publishedUtc: number): number {

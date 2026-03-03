@@ -73,6 +73,18 @@ function normalizeJsonItem(item: RssAppItem, sourceName: string): SourceNewsItem
   const url = normalizeUrl(item.url ?? item.link);
   if (!title || !url) return null;
 
+  // Reject channel/site-description meta-items injected by rss.app.
+  // These have the source name as the title or point to a root/generic URL.
+  if (title.toLowerCase() === sourceName.toLowerCase()) return null;
+  try {
+    const parsed = new URL(url);
+    const pathSegments = parsed.pathname.replace(/\/+$/, "").split("/").filter(Boolean);
+    // A real article URL will have at least 2 path segments (e.g. /section/slug).
+    if (pathSegments.length < 2) return null;
+  } catch {
+    // keep going if URL parsing fails
+  }
+
   const excerptRaw = item.content_text ?? item.description ?? item.content_html ?? "";
 
   return {
